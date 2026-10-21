@@ -117,7 +117,8 @@ local function readGauges()
             local w = wanted[g.item] or { target = 0, stock = g.stock or 0, passive = true }
             w.target = math.max(w.target, (g.count or 0) * mult)
             w.stock = math.max(w.stock, g.stock or 0)
-            if g.requestMode == "NORMAL" then w.passive = false end
+            -- a Normal gauge with an address orders by itself; Passive or address-less ones are ours
+            if g.requestMode == "NORMAL" and (g.address or "") ~= "" then w.passive = false end
             wanted[g.item] = w
           end
         end
