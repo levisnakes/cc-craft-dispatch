@@ -80,11 +80,12 @@ local state = { problem = nil, paused = false }
 
 -- ============================================================ peripherals
 
-local ticker
+local ticker, requester
 local controllers = {}
 
 local function findPeripherals()
   ticker = peripheral.find("Create_StockTicker")
+  requester = peripheral.find("Create_RedstoneRequester")
   controllers = { peripheral.find("factory_controller") }
   for _, name in ipairs(peripheral.getNames()) do
     if peripheral.hasType(name, "modem") and not rednet.isOpen(name) then pcall(rednet.open, name) end
@@ -92,7 +93,8 @@ local function findPeripherals()
 end
 
 local function setupProblem()
-  if not ticker then return "No Stock Ticker on the network" end
+  if not ticker then return "No Stock Ticker on the network (reads stock)" end
+  if not requester then return "No Redstone Requester on the network (sends orders)" end
   if #controllers == 0 then return "No Factory Controller on the network" end
   local anyModem = false
   for _, name in ipairs(peripheral.getNames()) do if peripheral.hasType(name, "modem") then anyModem = true end end
@@ -170,17 +172,35 @@ local function inFlight(out)
   return n
 end
 
+-- A Redstone Requester order: at most 9 entries of at most 256 items each.
+local function entriesFor(grid, crafts)
+  local entries = {}
+  for name, per in pairs(perCraft(grid)) do
+    local left = per * crafts
+    while left > 0 do
+      local n = math.min(256, left)
+      table.insert(entries, { name = name, count = n })
+      left = left - n
+    end
+  end
+  return entries
+end
+
 local function order(out, crafts, station, stock)
   local r = recipes[out]
   local s = stations[station]
-  local filters, total = {}, 0
-  for name, per in pairs(perCraft(r.grid)) do
-    table.insert(filters, { name = name, _requestCount = per * crafts })
-    total = total + per * crafts
-  end
-  local ok, sent = pcall(ticker.requestFiltered, s.address, table.unpack(filters))
-  if not ok or not sent or sent == 0 then
-    log("error", "Stock Ticker couldn't send ingredients for " .. short(out) .. " to " .. s.address .. ": " .. tostring(sent))
+  while crafts > 1 and #entriesFor(r.grid, crafts) > 9 do crafts = crafts - 1 end
+  -- the Stock Ticker's own ordering crashes on dedicated servers (it reads every item's
+  -- details), so orders go through a Redstone Requester; the Stock Ticker only reads stock
+  local ok, err = pcall(function()
+    requester.setConfiguration("strict")
+    requester.setAddress(s.address)
+    requester.setRequest(table.unpack(entriesFor(r.grid, crafts)))
+    requester.request()
+  end)
+  local sent, total = 1, 1
+  if not ok then
+    log("error", "Redstone Requester couldn't order ingredients for " .. short(out) .. " to " .. s.address .. ": " .. tostring(err))
     return false
   end
   for name, per in pairs(perCraft(r.grid)) do stock[name] = (stock[name] or 0) - per * crafts end

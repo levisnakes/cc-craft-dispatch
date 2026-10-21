@@ -8,7 +8,7 @@ No Custom Arrangement, no recipe on the packages, no shared address: each turtle
 
 **Already running the [Factory Monitor](https://github.com/levisnakes/cc-factory-monitor)?** It has the Dispatcher built in: just put a Stock Ticker on its network. Otherwise use `dispatcher.lua`:
 
-On the same modem network as a **Stock Ticker**, the **Factory Controller** and the crafters:
+On the same modem network as a **Stock Ticker** (reads stock), a **Redstone Requester** (sends the orders; the Stock Ticker's own ordering crashes on dedicated servers), the **Factory Controller** and the crafters. Link the Redstone Requester to your storage network like the Stock Ticker:
 
 ```
 wget https://raw.githubusercontent.com/levisnakes/cc-craft-dispatch/main/dispatcher.lua startup.lua
