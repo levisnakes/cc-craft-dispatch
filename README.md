@@ -6,6 +6,8 @@ No Custom Arrangement, no recipe on the packages, no shared address: each turtle
 
 ## Dispatcher (one computer)
 
+**Already running the [Factory Monitor](https://github.com/levisnakes/cc-factory-monitor)?** It has the Dispatcher built in: just put a Stock Ticker on its network. Otherwise use `dispatcher.lua`:
+
 On the same modem network as a **Stock Ticker**, the **Factory Controller** and the crafters:
 
 ```
