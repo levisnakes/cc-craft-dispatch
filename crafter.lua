@@ -13,6 +13,7 @@ ADDRESS = nil                  -- this turtle's own address; nil = "MB-Crafter-<
 INPUT_SIDE = "front"           -- the input Frogport (the turtle sets its address)
 OUTPUT_SIDE = "back"           -- the output Packager
 WAIT_MINUTES = 3               -- craft what has arrived if an order is still incomplete after this long
+NOTHING_SECONDS = 60           -- give an order back if none of its ingredients arrived at all by then
 STATION_NAME = nil             -- nil = the turtle's label, or "Crafter <id>"
 AUTO_UPDATE = true             -- install new versions from GitHub automatically, keeping these settings
 
@@ -33,7 +34,7 @@ end
 
 -- ============================================================ basics
 
-local VERSION = "1.0.0"
+local VERSION = "1.0.1"
 local PROTOCOL = "craft-dispatch"
 local DIR = "/crafter"
 local GRID = { 1, 2, 3, 5, 6, 7, 9, 10, 11 }
@@ -454,6 +455,12 @@ local function work()
   local remaining = job.crafts - job.done
   local can = math.min(remaining, craftable(job.grid, have))
   local waited = now() - job.t
+  local anyArrived = false
+  for name in pairs(perCraft(job.grid)) do if (have[name] or 0) > 0 then anyArrived = true end end
+  if not anyArrived and job.done == 0 and waited >= NOTHING_SECONDS then
+    finishJob(0, "nothing arrived (storage short of an ingredient?)")
+    return
+  end
   if can < remaining and waited < WAIT_MINUTES * 60 then
     state.status = "Order " .. job.id .. ": waiting for ingredients (" .. can .. "/" .. remaining .. ")"
     return

@@ -57,6 +57,8 @@ local jobs = readFile(DIR .. "/jobs", {})         -- [id] = { id, station, out, 
 local nextJob = readFile(DIR .. "/next", 1)
 local stations = {}                               -- [computer id] = { address, name, free, job, t, assigned }
 local recent = {}                                 -- finished orders still on their way to storage
+local cooldown = {}                               -- [output] = time; after an order where nothing arrived
+local RESERVE_SECONDS = 90                        -- ingredients ordered this recently may still show in stock
 local items = {}                                  -- what the screen shows per gauge item
 local function saveRecipes() writeFile(DIR .. "/recipes", recipes) end
 local function saveJobs() writeFile(DIR .. "/jobs", jobs) writeFile(DIR .. "/next", nextJob) end
@@ -206,7 +208,9 @@ local function order(out, crafts, station, stock)
   for name, per in pairs(perCraft(r.grid)) do stock[name] = (stock[name] or 0) - per * crafts end
   local id = nextJob
   nextJob = nextJob + 1
-  jobs[id] = { id = id, station = station, out = out, crafts = crafts, outCount = r.outCount or 1, t = now() }
+  local need = {}
+  for name, per in pairs(perCraft(r.grid)) do need[name] = per * crafts end
+  jobs[id] = { id = id, station = station, out = out, crafts = crafts, outCount = r.outCount or 1, t = now(), need = need }
   saveJobs()
   s.assigned, s.assignedAt = id, now()
   send({ kind = "job", to = station, job = id, grid = r.grid, crafts = crafts, out = out, outCount = r.outCount or 1 })
@@ -228,6 +232,12 @@ local function tick()
   local wanted = readGauges()
   for out, w in pairs(wanted) do lastStock[out] = w.stock end
   local stock = readStock()
+  -- ingredients ordered moments ago can still be sitting in storage: don't promise them twice
+  for _, j in pairs(jobs) do
+    if now() - j.t < RESERVE_SECONDS then
+      for name, n in pairs(j.need or {}) do stock[name] = (stock[name] or 0) - n end
+    end
+  end
   items = {}
   local list = {}
   for out, w in pairs(wanted) do
@@ -244,6 +254,10 @@ local function tick()
     local r = recipes[info.out]
     local deficit = info.target - info.stock - inFlight(info.out)
     info.state = deficit > 0 and "short" or "stocked"
+    if deficit > 0 and cooldown[info.out] and now() < cooldown[info.out] then
+      info.state = "nothing arrived, retry in " .. math.ceil(cooldown[info.out] - now()) .. "s"
+      deficit = 0
+    end
     while deficit > 0 do
       local station = freeStation()
       if not station then info.state = "waiting for a free crafter" break end
@@ -282,6 +296,7 @@ local function onMessage(from, msg)
       if made > 0 then table.insert(recent, { out = j.out, count = made, t = now(), stockAt = lastStock[j.out] or 0 }) end
       jobs[msg.job] = nil
       saveJobs()
+      if msg.kind == "failed" and made == 0 then cooldown[j.out] = now() + 120 end
       if msg.kind == "failed" then
         log("warn", "Order " .. msg.job .. " (" .. short(j.out) .. "): " .. tostring(msg.reason) .. ", " .. made .. " made")
       else
