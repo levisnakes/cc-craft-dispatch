@@ -27,7 +27,7 @@ end
 
 -- ============================================================ basics
 
-local VERSION = "1.0.1"
+local VERSION = "1.0.2"
 local PROTOCOL = "craft-dispatch"
 local DIR = "/dispatch"
 local function now() return os.epoch("utc") / 1000 end
@@ -188,10 +188,20 @@ local function entriesFor(grid, crafts)
   return entries
 end
 
+-- An order must fit in the turtle's barrel (27 slots, a few kept free): fewer crafts for
+-- ingredients that stack to less than 64.
+local function barrelSlots(r, crafts)
+  local slots = 0
+  for name, per in pairs(perCraft(r.grid)) do
+    slots = slots + math.ceil(per * crafts / ((r.stacks or {})[name] or 64))
+  end
+  return slots
+end
+
 local function order(out, crafts, station, stock)
   local r = recipes[out]
   local s = stations[station]
-  while crafts > 1 and #entriesFor(r.grid, crafts) > 9 do crafts = crafts - 1 end
+  while crafts > 1 and (#entriesFor(r.grid, crafts) > 9 or barrelSlots(r, crafts) > 24) do crafts = crafts - 1 end
   -- the Stock Ticker's own ordering crashes on dedicated servers (it reads every item's
   -- details), so orders go through a Redstone Requester; the Stock Ticker only reads stock
   local ok, err = pcall(function()
@@ -213,7 +223,7 @@ local function order(out, crafts, station, stock)
   jobs[id] = { id = id, station = station, out = out, crafts = crafts, outCount = r.outCount or 1, t = now(), need = need }
   saveJobs()
   s.assigned, s.assignedAt = id, now()
-  send({ kind = "job", to = station, job = id, grid = r.grid, crafts = crafts, out = out, outCount = r.outCount or 1 })
+  send({ kind = "job", to = station, job = id, grid = r.grid, crafts = crafts, out = out, outCount = r.outCount or 1, outStack = r.outStack })
   log("info", "Order " .. id .. ": " .. crafts .. "x " .. short(out) .. " -> " .. s.name .. (sent < total and (" (only " .. sent .. "/" .. total .. " items sent)") or ""))
   return true
 end
@@ -305,7 +315,7 @@ local function onMessage(from, msg)
     end
     if stations[from] then stations[from].assigned = nil end
   elseif msg.kind == "learn" and type(msg.grid) == "table" and msg.out then
-    recipes[msg.out] = { grid = msg.grid, outCount = msg.outCount or 1, by = from, t = now() }
+    recipes[msg.out] = { grid = msg.grid, outCount = msg.outCount or 1, outStack = msg.outStack, stacks = msg.stacks, by = from, t = now() }
     saveRecipes()
     log("craft", "Learned " .. short(msg.out) .. " (" .. (msg.outCount or 1) .. " per craft) from " .. tostring(stations[from] and stations[from].name or from))
     send({ kind = "learned", by = from, out = msg.out })

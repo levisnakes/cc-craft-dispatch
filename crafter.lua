@@ -34,7 +34,7 @@ end
 
 -- ============================================================ basics
 
-local VERSION = "1.0.1"
+local VERSION = "1.0.2"
 local PROTOCOL = "craft-dispatch"
 local DIR = "/crafter"
 local GRID = { 1, 2, 3, 5, 6, 7, 9, 10, 11 }
@@ -338,7 +338,13 @@ local function craftBatch(grid, n)
   local results = {}
   for i = 1, 16 do
     local d = turtle.getItemDetail(i)
-    if d then results[d.name] = (results[d.name] or 0) + d.count end
+    if d then
+      results[d.name] = (results[d.name] or 0) + d.count
+      if job and d.name == job.out and not job.outStack then
+        local full = turtle.getItemDetail(i, true)
+        job.outStack = full and full.maxCount or 64
+      end
+    end
   end
   dbg("crafted " .. crafts .. "x: " .. fmtCounts(results))
   sendTurtle()
@@ -389,7 +395,8 @@ local function onMessage(msg)
       send({ kind = "failed", job = msg.job, crafted = 0, reason = "busy with order " .. job.id })
       return
     end
-    job = { id = msg.job, grid = msg.grid, crafts = msg.crafts, done = 0, out = msg.out, outCount = msg.outCount or 1, t = now() }
+    job = { id = msg.job, grid = msg.grid, crafts = msg.crafts, done = 0, out = msg.out, outCount = msg.outCount or 1,
+      outStack = msg.outStack, t = now() }
     saveJob()
     log("info", "Order " .. job.id .. ": " .. job.crafts .. " crafts of " .. short(job.out))
     state.lastBeat = 0
@@ -403,11 +410,14 @@ end
 -- Learn: the recipe sits in the 3x3 grid; craft it once to see what it makes.
 local function learn()
   if job then log("warn", "Can't learn while an order is running") return end
-  local grid, any = {}, false
+  local grid, any, stacks = {}, false, {}
   for k, slot in ipairs(GRID) do
-    local d = turtle.getItemDetail(slot)
+    local d = turtle.getItemDetail(slot, true)
     grid[k] = d and d.name or false
-    if d then any = true end
+    if d then
+      any = true
+      stacks[d.name] = d.maxCount or 64
+    end
   end
   for _, s in ipairs(SPARE) do
     if turtle.getItemCount(s) > 0 then
@@ -420,13 +430,13 @@ local function learn()
   local ok, why = turtle.craft(1)
   turtle.select(1)
   if not ok then log("warn", "Learn: that's not a crafting recipe (" .. tostring(why) .. ")") return end
-  local out, outCount
+  local out, outCount, outStack
   for _, s in ipairs(SPARE) do
-    local d = turtle.getItemDetail(s)
-    if d and (not outCount or d.count > outCount) then out, outCount = d.name, d.count end
+    local d = turtle.getItemDetail(s, true)
+    if d and (not outCount or d.count > outCount) then out, outCount, outStack = d.name, d.count, d.maxCount end
   end
   if not out then log("warn", "Learn: crafted, but couldn't see the result") return end
-  send({ kind = "learn", grid = grid, out = out, outCount = outCount })
+  send({ kind = "learn", grid = grid, out = out, outCount = outCount, outStack = outStack or 64, stacks = stacks })
   log("info", "Learned: " .. outCount .. "x " .. short(out) .. ". Sent to the Dispatcher.")
   sendTurtle()
 end
@@ -468,7 +478,10 @@ local function work()
   local limit = 64
   for name in pairs(perCraft(job.grid)) do limit = math.min(limit, maxStack(name)) end
   while can > 0 do
-    local n = math.min(can, limit)
+    -- results land in the 7 spare slots: unstackable or small-stack results craft in smaller batches
+    -- (a result's stack size is measured on the first batch if the recipe didn't record it)
+    local outLimit = math.max(1, math.floor(7 * (job.outStack or 1) / (job.outCount or 1)))
+    local n = math.min(can, limit, outLimit)
     state.status = "Crafting " .. n .. "x " .. short(job.out)
     local done = craftBatch(job.grid, n)
     if done <= 0 then break end
