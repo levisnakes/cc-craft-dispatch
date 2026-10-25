@@ -27,7 +27,7 @@ end
 
 -- ============================================================ basics
 
-local VERSION = "1.0.0"
+local VERSION = "1.0.1"
 local PROTOCOL = "craft-dispatch"
 local DIR = "/dispatch"
 local function now() return os.epoch("utc") / 1000 end
